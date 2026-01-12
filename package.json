@@ -1,0 +1,38 @@
+{
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build"
+    },
+    "devDependencies": {
+        "@inertiajs/vue3": "^1.0.0",
+        "@tailwindcss/forms": "^0.5.3",
+        "@vitejs/plugin-vue": "^5.2.4",
+        "autoprefixer": "^10.4.21",
+        "axios": "^1.1.2",
+        "laravel-vite-plugin": "^1.3.0",
+        "postcss": "^8.5.6",
+        "tailwindcss": "^3.3.3",
+        "vite": "^6.3.5",
+        "vue": "^3.2.41"
+    },
+    "dependencies": {
+        "@headlessui/vue": "^1.7.14",
+        "@inertiajs/inertia": "^0.11.1",
+        "@vuepic/vue-datepicker": "^5.4.0",
+        "@vueuse/core": "^10.2.1",
+        "chart.js": "^4.5.1",
+        "dayjs": "^1.11.9",
+        "flag-icons": "^6.9.2",
+        "flowbite": "^1.6.5",
+        "lodash": "^4.17.21",
+        "lodash.debounce": "^4.0.8",
+        "vue-chartjs": "^5.3.3",
+        "vue-datepicker-next": "^1.0.3",
+        "vue-simple-calendar": "^6.3.1",
+        "vue-sweetalert2": "^5.0.5",
+        "vue-tailwind-datepicker": "^1.4.5",
+        "vue-toastification": "^2.0.0-rc.5"
+    }
+}

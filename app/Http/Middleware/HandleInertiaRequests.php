@@ -1,0 +1,78 @@
+<?php
+
+namespace App\Http\Middleware;
+
+use App\Models\User;
+use Illuminate\Http\Request;
+use Inertia\Middleware;
+use Tightenco\Ziggy\Ziggy;
+use Illuminate\Support\Facades\Cache;
+
+class HandleInertiaRequests extends Middleware
+{
+    /**
+     * The root template that is loaded on the first page visit.
+     *
+     * @var string
+     */
+    protected $rootView = 'app';
+
+    /**
+     * Determine the current asset version.
+     */
+    public function version(Request $request): string|null
+    {
+        return parent::version($request);
+    }
+
+    /**
+     * Define the props that are shared by default.
+     *
+     * @return array<string, mixed>
+     */
+    public function share(Request $request): array
+    {
+        return array_merge(parent::share($request), [
+            'auth' => [
+                'user' => $request->user() ? [
+                    'id' => $request->user()->user_id,
+                    'name' => $request->user()->name,
+                    'email' => $request->user()->email,
+                    // Map Oracle roles to Laravel frontend expected roles
+                    'role' => match (strtolower($request->user()->user_role ?? '')) {
+                        'supervisor' => 'admin',
+                        'staff' => 'employee',
+                        'owner' => 'owner',
+                        default => 'employee',
+                    },
+                ] : null,
+            ],
+            'ziggy' => function () use ($request) {
+                return array_merge((new Ziggy)->toArray(), [
+                    'location' => $request->url(),
+                ]);
+            },
+            'ui' => [
+                'empCount' => Cache::remember('global_emp_count', 60, fn() => User::count()),
+                // Admin sees pending requests count in the sidebar, while employees see only updated requests count.
+                'reqCount' => $request->user() ? Cache::remember('user_req_count_' . $request->user()->id, 60, function () {
+                    return isAdmin() ? \App\Models\LeaveRequest::where('status', 0)->count() :
+                        \App\Models\LeaveRequest::where('user_id', auth()->user()->user_id)
+                            ->where('status', '!=', 0)->count();
+                }) : null,
+            ],
+            'session' => [
+                'update_in_progress' => session('update_in_progress'),
+            ],
+            'locale' => config('app.locale'),
+            'timezone' => config('app.timezone'),
+            'flash' => [
+                'message' => fn() => $request->session()->get('message'),
+                'success' => fn() => $request->session()->get('success'),
+                'error' => fn() => $request->session()->get('error'),
+                'warning' => fn() => $request->session()->get('warning'),
+                'info' => fn() => $request->session()->get('info'),
+            ],
+        ]);
+    }
+}
