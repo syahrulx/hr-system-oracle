@@ -64,7 +64,6 @@ class HandleInertiaRequests extends Middleware
             'session' => [
                 'update_in_progress' => session('update_in_progress'),
             ],
-            'locale' => config('app.locale'),
             'timezone' => config('app.timezone'),
             'flash' => [
                 'message' => fn() => $request->session()->get('message'),

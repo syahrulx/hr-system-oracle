@@ -99,3 +99,36 @@
 .li-radio-input {
     @apply w-4 h-4 text-red-600 bg-gray-100 border-gray-300 focus:ring-red-500 dark:focus:ring-red-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600;
 }
+
+/* Glassmorphism Design System */
+.glass-panel {
+    @apply bg-slate-900/40 backdrop-blur-xl border border-white/5 rounded-2xl shadow-2xl transition-all duration-300;
+}
+
+.glass-panel-hover {
+    @apply hover:bg-slate-900/60 hover:border-white/10 hover:shadow-red-500/10;
+}
+
+.text-data {
+    font-family: "JetBrains Mono", monospace;
+}
+
+.text-premium {
+    font-family: "Plus Jakarta Sans", sans-serif;
+}
+
+.card-header-modern {
+    @apply text-2xl font-black tracking-tight bg-gradient-to-br from-white to-gray-400 bg-clip-text text-transparent uppercase;
+}
+
+.status-emerald {
+    @apply bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-[0_0_15px_-3px_rgba(16,185,129,0.2)];
+}
+
+.status-amber {
+    @apply bg-amber-500/10 text-amber-400 border border-amber-500/20 shadow-[0_0_15px_-3px_rgba(245,158,11,0.2)];
+}
+
+.status-rose {
+    @apply bg-rose-500/10 text-rose-400 border border-rose-500/20 shadow-[0_0_15px_-3px_rgba(244,63,94,0.2)];
+}

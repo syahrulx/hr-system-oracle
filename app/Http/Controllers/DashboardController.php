@@ -14,8 +14,11 @@ class DashboardController extends Controller
 
     public function index()
     {
-        // Allow all authenticated users to access dashboard
         $user = auth()->user();
+        if (strtolower($user->user_role ?? '') === 'owner') {
+            return redirect()->route('reports.index');
+        }
+
         // Batched Query: Fetch all relevant attendances for this year in one go
         $now = Carbon::now();
         $curMonth = $now->month;
@@ -25,10 +28,10 @@ class DashboardController extends Controller
         // 1. Fetch all attendance records for this user for the current year, eager loading schedule
         $attendancesThisYear = $user->attendances()
             ->with([
-                'schedule' => function ($q) use ($curYear) {
-                    $q->whereYear('shift_date', $curYear);
-                }
-            ])
+                    'schedule' => function ($q) use ($curYear) {
+                        $q->whereYear('shift_date', $curYear);
+                    }
+                ])
             ->get()
             // Filter out attendances where the schedule doesn't match the year (due to eager loading constraint applying to "with" but not the main query if not careful, though here we filter after)
             // Actually, we need to filter the main result based on the relationship relation.
@@ -42,12 +45,25 @@ class DashboardController extends Controller
             return $att->schedule && $att->schedule->shift_date === $todayStr;
         });
 
+        // Get clock-in time for display
+        $clockInTime = null;
+        $clockOutTime = null;
         if (is_null($attendanceChecker)) {
             $attendanceStatus = 0;
         } else if ($attendanceChecker->clock_out_time == null) {
             $attendanceStatus = 1;
+            // Format clock-in time for display
+            if ($attendanceChecker->clock_in_time) {
+                $clockInTime = Carbon::parse($attendanceChecker->clock_in_time)->format('h:i A');
+            }
         } else {
             $attendanceStatus = 2;
+            if ($attendanceChecker->clock_in_time) {
+                $clockInTime = Carbon::parse($attendanceChecker->clock_in_time)->format('h:i A');
+            }
+            if ($attendanceChecker->clock_out_time) {
+                $clockOutTime = Carbon::parse($attendanceChecker->clock_out_time)->format('h:i A');
+            }
         }
 
         // 3. Calculate Month Stats in Memory
@@ -73,21 +89,7 @@ class DashboardController extends Controller
         $estimatedWeekends = 8;
         $estimatedHolidays = 2;
 
-        // Owner overview metrics
-        $isOwner = strtolower($user->user_role ?? '') === 'owner';
-        $today = Carbon::today()->toDateString();
-        $staffCount = User::whereRaw("LOWER(user_role) IN ('admin', 'employee', 'supervisor', 'staff')")->count();
-        $presentToday = Attendance::where('status', '!=', 'missed')
-            ->whereHas('schedule', function ($q) use ($today) {
-                $q->where('shift_date', $today);
-            })
-            ->distinct('user_id')->count('user_id');
-        $lateToday = Attendance::where('status', 'late')
-            ->whereHas('schedule', function ($q) use ($today) {
-                $q->where('shift_date', $today);
-            })
-            ->distinct('user_id')->count('user_id');
-        $absentToday = max($staffCount - $presentToday, 0);
+
         // 5. Chart Data: Last 7 Days Attendance Trends
         // 5. Chart Data: Last 7 Days Attendance Trends (Optimized)
         $chartData = [];
@@ -97,7 +99,7 @@ class DashboardController extends Controller
         $todayDate = Carbon::today();
 
         // Single Query to fetch daily counts
-        if ($isOwner || isAdmin()) {
+        if (isAdmin()) {
             // Global: Count distinct users present per day
             // We group by the SCHEDULE date.
             $dailyCounts = Attendance::where('status', '!=', 'missed')
@@ -151,16 +153,10 @@ class DashboardController extends Controller
                 ],
             ],
             "attendance_status" => $attendanceStatus,
+            "clock_in_time" => $clockInTime,
+            "clock_out_time" => $clockOutTime,
             "is_today_off" => false,
             "total_clients" => 0,
-            "is_owner" => $isOwner,
-            "owner_stats" => [
-                'staffCount' => $staffCount,
-                'presentToday' => $presentToday,
-                'lateToday' => $lateToday,
-                'absentToday' => $absentToday,
-                'pendingRequests' => $pendingRequests,
-            ],
         ]);
     }
 

@@ -20,34 +20,74 @@ class ReportsController extends Controller
         $monthNum = substr($month, 5, 2);
         $staffId = $request->input('staff_id');
 
-        // Get all employees (excluding owner) - just IDs and names
-        $allEmployees = User::whereRaw("LOWER(user_role) != 'owner'")->select('user_id as id', 'name')->get();
+        // Get all employees (excluding owner) - include leave balances
+        $allEmployees = User::whereRaw("LOWER(user_role) != 'owner'")
+            ->select('user_id as id', 'name', 'annual_leave_balance', 'sick_leave_balance', 'emergency_leave_balance')
+            ->get();
 
         $employeeIds = $staffId ? [$staffId] : $allEmployees->pluck('id')->toArray();
 
-        // BULK QUERY: Get all attendance stats in one query
+        // Debug: Log database counts
+        $sampleShifts = DB::table('shift_schedules')->select('shift_date')->limit(5)->get();
+        $shiftsInMonth = DB::table('shift_schedules')
+            ->whereRaw("TO_CHAR(shift_date, 'YYYY-MM') = ?", [$month])
+            ->count();
+        \Log::info('Reports Debug', [
+            'month' => $month,
+            'year' => $year,
+            'monthNum' => $monthNum,
+            'total_employees' => count($employeeIds),
+            'total_attendances' => DB::table('attendances')->count(),
+            'total_shifts' => DB::table('shift_schedules')->count(),
+            'shifts_in_requested_month' => $shiftsInMonth,
+            'sample_shift_dates' => $sampleShifts->pluck('shift_date')->toArray(),
+        ]);
+
+        // BULK QUERY: Get all attendance stats in one query - JOIN with shift_schedules to filter by month
         $attendanceStats = DB::table('attendances')
+            ->join('shift_schedules', 'attendances.shift_id', '=', 'shift_schedules.shift_id')
             ->select(
-                'user_id',
+                'attendances.user_id',
                 DB::raw('COUNT(*) as total'),
-                DB::raw('COUNT(CASE WHEN status != \'missed\' THEN 1 END) as present'),
-                DB::raw('COUNT(CASE WHEN status = \'missed\' THEN 1 END) as absent'),
-                DB::raw('COUNT(CASE WHEN status = \'on_time\' THEN 1 END) as on_time'),
-                DB::raw('COUNT(CASE WHEN status = \'late\' THEN 1 END) as late')
+                DB::raw('COUNT(CASE WHEN attendances.status != \'missed\' THEN 1 END) as present'),
+                DB::raw('COUNT(CASE WHEN attendances.status = \'missed\' THEN 1 END) as absent'),
+                DB::raw('COUNT(CASE WHEN attendances.status = \'on_time\' THEN 1 END) as on_time'),
+                DB::raw('COUNT(CASE WHEN attendances.status = \'late\' THEN 1 END) as late')
             )
-            ->whereIn('user_id', $employeeIds)
-            ->groupBy('user_id')
+            ->whereIn('attendances.user_id', $employeeIds)
+            ->whereRaw("TO_CHAR(shift_schedules.shift_date, 'YYYY') = ?", [$year])
+            ->whereRaw("TO_CHAR(shift_schedules.shift_date, 'MM') = ?", [$monthNum])
+            ->groupBy('attendances.user_id')
             ->get()
             ->keyBy('user_id');
+
+        // Debug: Check the joined attendance count
+        $joinedCount = DB::table('attendances')
+            ->join('shift_schedules', 'attendances.shift_id', '=', 'shift_schedules.shift_id')
+            ->count();
+        $joinedMonthCount = DB::table('attendances')
+            ->join('shift_schedules', 'attendances.shift_id', '=', 'shift_schedules.shift_id')
+            ->whereRaw("TO_CHAR(shift_schedules.shift_date, 'YYYY-MM') = ?", [$month])
+            ->count();
+        \Log::info('Attendance Debug', [
+            'joined_total' => $joinedCount,
+            'joined_in_month' => $joinedMonthCount,
+            'stats_count' => $attendanceStats->count(),
+            'stats' => $attendanceStats->toArray(),
+        ]);
 
         // Compute useful metrics for owners
         $monthStart = Carbon::createFromDate((int) $year, (int) $monthNum, 1)->startOfMonth();
         $monthEnd = Carbon::createFromDate((int) $year, (int) $monthNum, 1)->endOfMonth();
 
         // 1) Working hours per staff (sum of daily hours for present/late records with both times)
-        $attendanceWithTimes = Attendance::whereIn('user_id', $employeeIds)
+        $attendanceWithTimes = Attendance::whereIn('attendances.user_id', $employeeIds)
+            ->join('shift_schedules', 'attendances.shift_id', '=', 'shift_schedules.shift_id')
             ->whereNotNull('clock_in_time')
             ->whereNotNull('clock_out_time')
+            ->whereRaw("TO_CHAR(shift_schedules.shift_date, 'YYYY') = ?", [$year])
+            ->whereRaw("TO_CHAR(shift_schedules.shift_date, 'MM') = ?", [$monthNum])
+            ->select('attendances.*')
             ->get();
         $secondsByEmp = [];
         $daysWithTimesByEmp = [];
@@ -61,13 +101,20 @@ class ReportsController extends Controller
 
         // 2) Approved leaves per staff (status = 1 assumed approved)
         $approvedLeaves = EmployeeRequest::whereIn('user_id', $employeeIds)
-            ->whereYear('start_date', $year)
-            ->whereMonth('start_date', $monthNum)
+            ->whereRaw("TO_CHAR(start_date, 'YYYY') = ?", [$year])
+            ->whereRaw("TO_CHAR(start_date, 'MM') = ?", [$monthNum])
             ->where('status', 1)
             ->select('user_id', DB::raw('COUNT(*) as approved'))
             ->groupBy('user_id')
             ->get()
             ->keyBy('user_id');
+
+        // Debug: Log approved leaves
+        \Log::info('Approved Leaves Debug', [
+            'total_leave_requests' => EmployeeRequest::count(),
+            'approved_in_period' => $approvedLeaves->count(),
+            'data' => $approvedLeaves->toArray(),
+        ]);
 
         // Calculate summary stats
         $totalEmployees = $allEmployees->count();
@@ -99,7 +146,6 @@ class ReportsController extends Controller
         $summary = [
             ['label' => 'Employees', 'value' => $totalEmployees],
             ['label' => 'Attendance Rate', 'value' => $attendanceRate . '%'],
-            ['label' => 'Avg Daily Hours', 'value' => $avgDailyHours . 'h'],
             ['label' => 'Top Performer', 'value' => $topPerformer['name'] . ' (' . $topPerformer['attendance_rate'] . '%)'],
         ];
 
@@ -114,16 +160,23 @@ class ReportsController extends Controller
 
         foreach ($employeesToDisplay as $employee) {
             $empId = $employee->id;
-            $attendStats = $attendanceStats->get($empId);
+            $attendStats = $attendanceStats->get((string) $empId);
 
+            // Debug: Log what we're looking up
+            \Log::info('Staff lookup', [
+                'empId' => $empId,
+                'empId_type' => gettype($empId),
+                'attendStats_found' => $attendStats !== null,
+                'present' => $attendStats->present ?? 'null',
+            ]);
 
             // Attendance breakdown
             $staffAttendance[] = [
                 'name' => $employee->name,
-                'present' => $attendStats->present ?? 0,
-                'absent' => $attendStats->absent ?? 0,
-                'late' => $attendStats->late ?? 0,
-                'on_time' => $attendStats->on_time ?? 0,
+                'present' => (int) ($attendStats->present ?? 0),
+                'absent' => (int) ($attendStats->absent ?? 0),
+                'late' => (int) ($attendStats->late ?? 0),
+                'on_time' => (int) ($attendStats->on_time ?? 0),
             ];
 
             // Working hours and approved leaves
@@ -139,7 +192,10 @@ class ReportsController extends Controller
 
             $staffLeaves[] = [
                 'name' => $employee->name,
-                'approved' => $approvedLeaves->get($empId)->approved ?? 0,
+                'approved' => (int) ($approvedLeaves->get((string) $empId)->approved ?? 0),
+                'annual_balance' => (int) ($employee->annual_leave_balance ?? 0),
+                'sick_balance' => (int) ($employee->sick_leave_balance ?? 0),
+                'emergency_balance' => (int) ($employee->emergency_leave_balance ?? 0),
             ];
 
             // Ranking
@@ -157,6 +213,9 @@ class ReportsController extends Controller
         usort($staffRanking, function ($a, $b) {
             return $b['score'] <=> $a['score'];
         });
+
+        // Debug: Final data check
+        \Log::info('Final staffAttendance', $staffAttendance);
 
         return Inertia::render('Reports/Reports', [
             'summary' => $summary,

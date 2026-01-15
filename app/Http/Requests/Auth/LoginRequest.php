@@ -41,7 +41,27 @@ class LoginRequest extends FormRequest
     {
         $this->ensureIsNotRateLimited();
 
-        if (! Auth::attempt($this->only('email', 'password'), $this->boolean('remember'))) {
+        $email = $this->input('email');
+        $password = $this->input('password');
+
+        // Debug: Check if user exists
+        $user = \App\Models\User::whereRaw('LOWER(email) = ?', [strtolower($email)])->first();
+
+        \Log::info('Login attempt', [
+            'email' => $email,
+            'user_found' => $user ? true : false,
+            'user_id' => $user->user_id ?? null,
+            'user_role' => $user->user_role ?? null,
+            'has_password' => $user && !empty($user->password),
+        ]);
+
+        if (!Auth::attempt($this->only('email', 'password'), $this->boolean('remember'))) {
+            // Case-insensitive fallback for Oracle
+            if ($user && Auth::attempt(['email' => $user->email, 'password' => $password], $this->boolean('remember'))) {
+                RateLimiter::clear($this->throttleKey());
+                return;
+            }
+
             RateLimiter::hit($this->throttleKey());
 
             throw ValidationException::withMessages([
@@ -59,7 +79,7 @@ class LoginRequest extends FormRequest
      */
     public function ensureIsNotRateLimited(): void
     {
-        if (! RateLimiter::tooManyAttempts($this->throttleKey(), 5)) {
+        if (!RateLimiter::tooManyAttempts($this->throttleKey(), 5)) {
             return;
         }
 
@@ -80,6 +100,6 @@ class LoginRequest extends FormRequest
      */
     public function throttleKey(): string
     {
-        return Str::transliterate(Str::lower($this->input('email')).'|'.$this->ip());
+        return Str::transliterate(Str::lower($this->input('email')) . '|' . $this->ip());
     }
 }
